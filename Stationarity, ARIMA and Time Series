@@ -1,0 +1,232 @@
+# All code adapted from https://www.analyticsvidhya.com/blog/2016/02/time-series-forecasting-codes-python/
+
+import pandas as pd
+import numpy as np
+from datetime import datetime
+import matplotlib.pyplot as plt
+from statsmodels.tsa.seasonal import seasonal_decompose
+from statsmodels.tsa.stattools import adfuller
+from statsmodels.tsa.stattools import acf, pacf
+from statsmodels.tsa.arima.model import ARIMA
+
+# load dataset
+data = pd.read_csv('AirPassengers.csv')
+print(data.head())
+print(' \n Data Types:')
+print(data.dtypes)
+
+# change data tpe to datetime
+data['Month'] = pd.to_datetime(data['Month'], format='%Y-%m')
+data.head()
+
+# set month as index
+ts = data.set_index('Month')
+ts.head(10)
+
+# check that we can slice data by date
+ts.loc['1949-01-01']
+
+# check that we can slice data by range
+ts.loc[:'1949-05-01']
+
+# check that we can slice data by year
+ts.loc['1949']
+
+# Check for stationarity of data by visualising data
+fig = plt.figure(figsize=(8,6))
+plt.plot(ts)
+plt.title('Air Passengers Time Series')
+plt.xlabel('Time (Years)')
+plt.ylabel('Number of Passengers')
+plt.show()
+
+# Check for Stationarity of time series by plotting rolling series and Dickey-Fuller Test
+def test_stationarity(timeseries):
+    
+    #Determing rolling statistics
+    rolmean = timeseries.rolling(window=12).mean()
+    rolstd = timeseries.rolling(window=12).std()
+
+    #Plot rolling statistics:
+    orig = plt.plot(timeseries, color='blue',label='Original')
+    mean = plt.plot(rolmean, color='red', label='Rolling Mean')
+    std = plt.plot(rolstd, color='black', label = 'Rolling Std')
+    plt.legend(loc='best')
+    plt.title('Rolling Mean & Standard Deviation')
+    plt.show(block=False)
+    
+    #Perform Dickey-Fuller test:
+    print('Results of Dickey-Fuller Test:')
+    dftest = adfuller(timeseries, autolag='AIC')
+    dfoutput = pd.Series(dftest[0:4], index=['Test Statistic','p-value','#Lags Used','Number of Observations Used'])
+    for key,value in dftest[4].items():
+        dfoutput['Critical Value (%s)'%key] = value
+    print(dfoutput)
+    
+fig = plt.figure(figsize=(8,6))
+test_stationarity(ts)
+
+# To move this time series towards stationarity we will first log transform the data
+ts_log = np.log(ts)
+fig = plt.figure(figsize=(8,6))
+plt.plot(ts_log)
+plt.title('Air Passengers Time Series')
+plt.xlabel('Time (Years)')
+plt.ylabel('log(Number of Passengers)')
+plt.show()
+
+# In this instance smoothing will be used on the data (we can also use aggregation or regression models)
+moving_avg = ts_log.rolling(12).mean()
+fig = plt.figure(figsize=(8,6))
+plt.plot(ts_log)
+plt.plot(moving_avg, color='red')
+plt.title('Air Passengers Time Series')
+plt.xlabel('Time (Years)')
+plt.ylabel('log(Number of Passengers)')
+plt.show()
+
+# subtract the rolling mean from the original series and test stationarity
+ts_log_moving_avg_diff = ts_log - moving_avg
+ts_log_moving_avg_diff.dropna(inplace=True)
+fig = plt.figure(figsize=(8,6))
+test_stationarity(ts_log_moving_avg_diff)
+
+# calculating and plotting the weighted moving average
+expwighted_avg = ts_log.ewm(halflife=12).mean()
+fig = plt.figure(figsize=(8,6))
+plt.plot(ts_log)
+plt.plot(expwighted_avg, color='red')
+plt.title('Air Passengers Time Series')
+plt.xlabel('Time (Years)')
+plt.ylabel('log(Number of Passengers)')
+plt.show()
+
+# test for stationarity
+ts_log_ewma_diff = ts_log - expwighted_avg
+fig = plt.figure(figsize=(8,6))
+test_stationarity(ts_log_ewma_diff)
+
+# If we choose to use differencing
+ts_log_diff = ts_log - ts_log.shift()
+fig = plt.figure(figsize=(8,6))
+plt.plot(ts_log_diff)
+plt.title('Air Passengers Time Series')
+plt.xlabel('Time (Years)')
+plt.ylabel('log(Number of Passengers)')
+plt.show()
+
+# Test stationarity
+ts_log_diff.dropna(inplace=True)
+fig = plt.figure(figsize=(8,6))
+test_stationarity(ts_log_diff)
+
+# If we choose to use decomposition
+decomposition = seasonal_decompose(ts_log)
+
+trend = decomposition.trend
+seasonal = decomposition.seasonal
+residual = decomposition.resid
+
+fig = plt.figure(figsize=(8,12))
+plt.subplot(411)
+plt.plot(ts_log, label='Original')
+plt.legend(loc='best')
+plt.subplot(412)
+plt.plot(trend, label='Trend')
+plt.legend(loc='best')
+plt.subplot(413)
+plt.plot(seasonal,label='Seasonality')
+plt.legend(loc='best')
+plt.subplot(414)
+plt.plot(residual, label='Residuals')
+plt.legend(loc='best')
+plt.tight_layout()
+
+# Check stationarity of residuals
+ts_log_decompose = residual
+ts_log_decompose.dropna(inplace=True)
+fig = plt.figure(figsize=(8,6))
+test_stationarity(ts_log_decompose)
+
+# Forecasting a Time Series
+
+#ACF and PACF plots
+lag_acf = acf(ts_log_diff, nlags=20, fft=False)
+lag_pacf = pacf(ts_log_diff, nlags=20, method='ols')
+
+#Plot ACF: 
+plt.figure(figsize=(18,6))
+plt.subplot(121) 
+plt.plot(lag_acf)
+plt.axhline(y=0,linestyle='--',color='gray')
+plt.axhline(y=-1.96/np.sqrt(len(ts_log_diff)),linestyle='--',color='gray')
+plt.axhline(y=1.96/np.sqrt(len(ts_log_diff)),linestyle='--',color='gray')
+plt.title('Autocorrelation Function')
+plt.show()
+
+#Plot PACF:
+plt.figure(figsize=(14,6))
+plt.subplot(122)
+plt.plot(lag_pacf)
+plt.axhline(y=0,linestyle='--',color='gray')
+plt.axhline(y=-1.96/np.sqrt(len(ts_log_diff)),linestyle='--',color='gray')
+plt.axhline(y=1.96/np.sqrt(len(ts_log_diff)),linestyle='--',color='gray')
+plt.title('Partial Autocorrelation Function')
+plt.tight_layout()
+
+# AR Model
+model = ARIMA(ts_log_diff, order=(1, 2, 0), freq='MS')    
+results_AR = model.fit()
+fig = plt.figure(figsize=(8,6))
+plt.plot(ts_log_diff)
+plt.plot(results_AR.fittedvalues, color='red')
+plt.title('AR results')
+plt.show()
+print(results_AR.summary())
+
+# MA Model
+model = ARIMA(ts_log_diff, order=(0, 2, 1), freq='MS')    
+results_AR = model.fit()
+fig = plt.figure(figsize=(8,6))
+plt.plot(ts_log_diff)
+plt.plot(results_AR.fittedvalues, color='red')
+plt.title('MA results')
+plt.show()
+print(results_AR.summary())
+
+# Combined ARIMA results
+model = ARIMA(ts_log_diff, order=(1, 2, 1), freq='MS')    
+results_AR = model.fit()
+fig = plt.figure(figsize=(8,6))
+plt.plot(ts_log_diff)
+plt.plot(results_AR.fittedvalues, color='red')
+plt.title('ARMA results')
+plt.show()
+print(results_AR.summary())
+
+# Taking it back to original scale
+predictions_ARIMA_diff = pd.Series(results_AR.fittedvalues, copy=True)
+print(predictions_ARIMA_diff.head())
+
+# culmulative sum
+predictions_ARIMA_diff_cumsum = predictions_ARIMA_diff.cumsum()
+print(predictions_ARIMA_diff_cumsum.head())
+
+# Check if correct
+predictions_ARIMA_log = pd.Series(ts_log.iloc[0,0], index=ts_log.index)
+predictions_ARIMA_log = predictions_ARIMA_log.add(predictions_ARIMA_diff_cumsum,fill_value=0)
+predictions_ARIMA_log.head()
+
+# Check predictions against actual output
+predictions_ARIMA = np.exp(predictions_ARIMA_log)
+fig = plt.figure(figsize=(8,6))
+plt.plot(ts)
+plt.plot(predictions_ARIMA)
+plt.legend(['Original','Predicted'])
+plt.title('ARMA predictions')
+
+# Calculate the mean squared error
+diff = ts['#Passengers'].astype('float64')-predictions_ARIMA
+mean_squared_error = np.power(diff, 2).mean()
+print('The mean squared error is: ', mean_squared_error)
+plt.show()
